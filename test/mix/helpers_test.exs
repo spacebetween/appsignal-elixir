@@ -1,5 +1,6 @@
 :code.delete(Mix.Appsignal.Helper)
 Application.put_env(:appsignal, :erlang, FakeErlang)
+Application.put_env(:appsignal, :hackney, FakeHackney)
 Application.put_env(:appsignal, :os, FakeOS)
 Application.put_env(:appsignal, :system, FakeSystem)
 {_, _} = Code.eval_file("mix_helpers.exs")
@@ -9,7 +10,44 @@ defmodule Mix.Appsignal.HelperTest do
   import AppsignalTest.Utils
 
   setup do
-    [fake_os: start_supervised!(FakeOS), fake_system: start_supervised!(FakeSystem)]
+    [
+      fake_hackney: start_supervised!(FakeHackney),
+      fake_os: start_supervised!(FakeOS),
+      fake_system: start_supervised!(FakeSystem)
+    ]
+  end
+
+  describe ".download_file!" do
+    test "writes the response body when Hackney returns it directly", %{fake_hackney: fake_hackney} do
+      local_filename = tmp_filename()
+
+      FakeHackney.update(fake_hackney, :request, fn :get, _url, [], "", _options ->
+        {:ok, 200, [], "archive-body"}
+      end)
+
+      assert Mix.Appsignal.Helper.download_file_for_test!("https://example.com/agent.tar.gz", local_filename) ==
+               :ok
+
+      assert File.read!(local_filename) == "archive-body"
+    end
+
+    test "writes the response body fetched through a Hackney reference", %{fake_hackney: fake_hackney} do
+      local_filename = tmp_filename()
+      reference = self()
+
+      FakeHackney.update(fake_hackney, :request, fn :get, _url, [], "", _options ->
+        {:ok, 200, [], reference}
+      end)
+
+      FakeHackney.update(fake_hackney, :body, fn ^reference ->
+        {:ok, "archive-body"}
+      end)
+
+      assert Mix.Appsignal.Helper.download_file_for_test!("https://example.com/agent.tar.gz", local_filename) ==
+               :ok
+
+      assert File.read!(local_filename) == "archive-body"
+    end
   end
 
   describe ".verify_system_architecture" do
@@ -214,5 +252,15 @@ defmodule Mix.Appsignal.HelperTest do
 
       assert Mix.Appsignal.Helper.uid() == nil
     end
+  end
+
+  defp tmp_filename do
+    filename = Path.join(System.tmp_dir!(), "appsignal-helper-test-#{System.unique_integer()}")
+
+    on_exit(fn ->
+      File.rm(filename)
+    end)
+
+    filename
   end
 end

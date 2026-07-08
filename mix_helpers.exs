@@ -8,6 +8,7 @@ defmodule Mix.Appsignal.Helper do
   """
 
   @erlang Application.compile_env(:appsignal, :erlang, :erlang)
+  @hackney Application.compile_env(:appsignal, :hackney, :hackney)
   @os Application.compile_env(:appsignal, :os, :os)
   @system Application.compile_env(:appsignal, :system, System)
 
@@ -209,10 +210,17 @@ defmodule Mix.Appsignal.Helper do
     end)
   end
 
+  if Mix.env() == :test do
+    def download_file_for_test!(url, local_filename), do: do_download_file!(url, local_filename)
+  end
+
   defp do_download_file!(url, local_filename) do
-    case :hackney.request(:get, url, [], "", download_options()) do
+    case @hackney.request(:get, url, [], "", download_options()) do
+      {:ok, 200, _, body} when is_binary(body) ->
+        File.write(local_filename, body)
+
       {:ok, 200, _, reference} ->
-        case :hackney.body(reference) do
+        case @hackney.body(reference) do
           {:ok, body} -> File.write(local_filename, body)
           {:error, reason} -> {:error, reason}
         end
