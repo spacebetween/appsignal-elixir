@@ -1,5 +1,316 @@
 # AppSignal for Elixir changelog
 
+## 2.18.4
+
+_Published on 2026-10-23._
+
+### Security
+
+- Bump the bundled certificates that the agent uses when it can't open the
+  configured CA file. They no longer include the emSign ECC Root CA - G3 and AAA
+  Certificate Services root certificates, which [compromised eMudhra intermediate
+  certificates](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449) chain to.
+
+  (patch [16dbdc27](https://github.com/appsignal/appsignal-elixir/commit/16dbdc2718e6618a9fae67db78b2c8482712907d), [dcd3d1fa](https://github.com/appsignal/appsignal-elixir/commit/dcd3d1fa3b12b07e903d51a0dc79dded7aba499a), [a27ae42c](https://github.com/appsignal/appsignal-elixir/commit/a27ae42ca32aceb11e93ecd2c18a53653bfeceb8), [445c5552](https://github.com/appsignal/appsignal-elixir/commit/445c5552837d1e61aed9a92a6fe1de8905a36fff), [db335309](https://github.com/appsignal/appsignal-elixir/commit/db3353093ec51f05abeddfa6fceb52bd4565d959), [86dd68ab](https://github.com/appsignal/appsignal-elixir/commit/86dd68ab57a666a1e6ecaaeefa95fd0438097444))
+
+## 2.18.3
+
+_Published on 2026-10-22._
+
+### Security
+
+- Stop trusting certificates issued under the eMudhra intermediate certificate authorities whose private keys were [compromised in October 2026](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449). The bundled CA certificates no longer include the emSign ECC Root CA - G3 root certificate, which those intermediates chain to. (patch [16dbdc27](https://github.com/appsignal/appsignal-elixir/commit/16dbdc2718e6618a9fae67db78b2c8482712907d), [dcd3d1fa](https://github.com/appsignal/appsignal-elixir/commit/dcd3d1fa3b12b07e903d51a0dc79dded7aba499a), [a27ae42c](https://github.com/appsignal/appsignal-elixir/commit/a27ae42ca32aceb11e93ecd2c18a53653bfeceb8))
+
+## 2.18.2
+
+_Published on 2026-10-14._
+
+### Added
+
+- Automatically detect the application's revision from the `HEROKU_BUILD_COMMIT`
+  environment variable, which is set by Heroku at runtime [when the
+  `runtime-dyno-build-metadata` Heroku Labs
+  feature](https://devcenter.heroku.com/articles/dyno-metadata) is enabled.
+
+  (patch [e0367a5b](https://github.com/appsignal/appsignal-elixir/commit/e0367a5bbccf65bb0d920a5035cc909b56fe745b))
+
+## 2.18.1
+
+_Published on 2026-10-02._
+
+### Fixed
+
+- Report Broadway messages as parameters instead of as a `message` tag. (patch [fe7299c8](https://github.com/appsignal/appsignal-elixir/commit/fe7299c89dc6a89bd8f0d48b72e27d923d2df2f3))
+
+## 2.18.0
+
+_Published on 2026-09-30._
+
+### Added
+
+- Automatically instrument Broadway library.
+
+  [Broadway](https://elixir-broadway.org/) is an Elixir library for building
+  concurrent and multi-stage data ingestion and data processing pipelines.
+
+  When Broadway processes one or more messages, a trace is created to represent
+  the processing of these messages.  Independent root spans encompass the call to
+  `prepare_messages/2` and `handle_message/3`.
+
+  This instrumentation is enable by default and only available for Broadway
+  versions higher than 1.0.0.
+
+  (minor [f58f5e72](https://github.com/appsignal/appsignal-elixir/commit/f58f5e725681cdf9824138a21e6a9acbd84aa7bf))
+
+## 2.17.7
+
+_Published on 2026-09-29._
+
+### Fixed
+
+- Fix an extension crash when the same span is used from multiple threads at the same time. (patch [fbda9042](https://github.com/appsignal/appsignal-elixir/commit/fbda90421e3a1e691af38ef0f4749a3fde2c53d1))
+
+## 2.17.6
+
+_Published on 2026-09-28._
+
+### Fixed
+
+- Improve handling of the extension internal queue when full. (patch [399c18f5](https://github.com/appsignal/appsignal-elixir/commit/399c18f5b52263c16b54f17fd2b5e849c79b48a9))
+- Fix issues in the extension that lead to gaps in data reporting. (patch [8503d575](https://github.com/appsignal/appsignal-elixir/commit/8503d575e34e21906e70525f8857ab4eccfe39ca))
+
+## 2.17.5
+
+_Published on 2026-09-10._
+
+### Changed
+
+- Update the agent to handle high traffic apps. On high-traffic apps that would exceed the maximum accepted internal payload size, send data to the Push API more frequently. (patch [dac002ad](https://github.com/appsignal/appsignal-elixir/commit/dac002add54dfa51a83b4ee95cdd5fadea2feea8))
+
+### Fixed
+
+- Fix the sanitization of function arguments in SQL statements.
+
+  Before this release, SQL sanitization of function arguments stripped out parts of the SQL statement after the function argument list.
+
+  (patch [c2b487b6](https://github.com/appsignal/appsignal-elixir/commit/c2b487b667a3d58b729fee0aba8589505eeb2ada))
+
+## 2.17.4
+
+_Published on 2026-07-09._
+
+### Changed
+
+- Allow HTTPoison 3.0 to be used as an optional dependency. Applications
+  on HTTPoison 3.0 can now use AppSignal's HTTPoison instrumentation
+  without a version conflict.
+
+  (patch [f697a54d](https://github.com/appsignal/appsignal-elixir/commit/f697a54db8780bde36430e074142bbb250c50844))
+
+## 2.17.3
+
+_Published on 2026-06-04._
+
+### Fixed
+
+- Fix host-metrics leaking zombie `[timeout]` processes in Alpine linux containers.
+
+  Before this release AppSignal agent relied on a proper init process that reaps child processes killed by system `timeout`. Now the agent terminates and reaps unresponsive child processes in host-metrics collection and a subreaper is no longer required.
+
+  (patch [85804b5d](https://github.com/appsignal/appsignal-elixir/commit/85804b5d1499a9ac12e83ea0f851da18b325b44b))
+
+## 2.17.2
+
+_Published on 2026-05-26._
+
+### Added
+
+- Emit distribution metrics from the Ecto integration.
+
+  Each Ecto query telemetry event now also reports its timing values as `ecto_query_time`, `ecto_queue_time`, `ecto_decode_time`, `ecto_idle_time` and `ecto_total_time` distribution metrics.
+
+  All five metrics are tagged by `repo` and `hostname`. The `ecto_query_time`, `ecto_decode_time` and `ecto_total_time` metrics are additionally tagged by `repo` and `source` (the Ecto table).
+
+  This surfaces pool waits, decode time, idle connection time and per-table latency as standalone metrics in addition to the existing query span.
+
+  (patch [7440fb76](https://github.com/appsignal/appsignal-elixir/commit/7440fb769af74fca362dd5a2b04f9c5bfe420583))
+
+### Fixed
+
+- Preserve sub-millisecond precision when reporting timing distribution metrics.
+
+  The Ecto (`ecto_query_time`, `ecto_queue_time`, `ecto_decode_time`, `ecto_idle_time`, `ecto_total_time`) and Oban (`oban_job_duration`, `oban_job_queue_time`) distribution metrics now report fractional milliseconds, instead of being truncated to whole milliseconds. Sub-millisecond measurements were previously rounded down to zero.
+
+  (patch [262fef55](https://github.com/appsignal/appsignal-elixir/commit/262fef550c5df4897fb70a2a49e6ac3eb4d155c2))
+
+## 2.17.1
+
+_Published on 2026-05-14._
+
+### Fixed
+
+- Continue reporting non-disk host metrics when a mount is frozen. (patch [433b4ac9](https://github.com/appsignal/appsignal-elixir/commit/433b4ac912953b61ea977c70ba4bdbd6df3bc87a))
+- Fix compatibility with Finch 0.22+. This change moves SSL and proxy options to pool-level `conn_opts` in `Finch.start_link`. (patch [c0d6c23d](https://github.com/appsignal/appsignal-elixir/commit/c0d6c23d9460f084e037df402f860970aa501700))
+
+### Security
+
+- [CVE-2026-32686](https://cna.erlef.org/cves/CVE-2026-32686.html) describes an unauthenticated remote Denial of Service vulnerability in `decmimal` before `3.0.0`.  Loosen `decimal` requirement to allow `~> 3.0` and fix compatibility with `ecto`. (patch [c0d6c23d](https://github.com/appsignal/appsignal-elixir/commit/c0d6c23d9460f084e037df402f860970aa501700))
+
+## 2.17.0
+
+_Published on 2026-03-09._
+
+### Added
+
+- Add HTTPoison instrumentation. HTTP requests made with HTTPoison will appear as `request.httpoison` events on your performance samples' event timeline.
+
+  HTTPoison does not emit telemetry events, so the instrumentation is opt-in. Use `Appsignal.HTTPoison` in place of `HTTPoison` when making requests, or replace `use HTTPoison.Base` with `use Appsignal.HTTPoison.Base` for custom client modules. Response types (`%HTTPoison.Response{}`, `%HTTPoison.Error{}`, etc.) are unchanged.
+
+  (minor [f667373a](https://github.com/appsignal/appsignal-elixir/commit/f667373ae7e02ae68f45547bf5a179fc9e0121c0))
+
+### Changed
+
+- Bundled certificates have been updated. (patch [16dbdc27](https://github.com/appsignal/appsignal-elixir/commit/16dbdc2718e6618a9fae67db78b2c8482712907d))
+
+## 2.16.0
+
+_Published on 2025-12-01._
+
+### Changed
+
+- Disable the error backend by default
+
+  With new ways of instrumenting errors added, the error backend is unneeded in most setups.
+  Disable it by default to make it opt-in.
+
+  (minor [5efd9179](https://github.com/appsignal/appsignal-elixir/commit/5efd91792477d778f06a40da01392f7915b5fd7c))
+
+## 2.15.11
+
+_Published on 2025-10-09._
+
+### Added
+
+- Add support for Oban timeout exceptions (patch [465a3858](https://github.com/appsignal/appsignal-elixir/commit/465a385806c7edddfe1188d40a52bb92cce365eb), [ac4effed](https://github.com/appsignal/appsignal-elixir/commit/ac4effed4e11096727dbb3740014b4672dd23f10))
+
+### Changed
+
+- Detect the log format automatically. We now detect if a log line is in the JSON, Logfmt or plaintext formats. No further config needed when calling our logger, like so:
+
+  ```elixir
+  Appsignal.Logger.info("group", "message")
+  ```
+
+  (patch [756dac39](https://github.com/appsignal/appsignal-elixir/commit/756dac39396a6f07d159747471bf663e7146d003))
+
+## 2.15.10
+
+_Published on 2025-07-22._
+
+### Fixed
+
+- Fix compatibility with Phoenix 1.8's parameter filtering compiled patterns. This will errors on boot about the AppSignal handlers not attaching. (patch [1449b9e9](https://github.com/appsignal/appsignal-elixir/commit/1449b9e9e61beea9dd249b29b86e539ebdf6303a))
+
+## 2.15.9
+
+_Published on 2025-06-18._
+
+### Changed
+
+- Allow for more customization of trace namespaces during the trace's lifetime.
+  Previously, it was not possible to customize the namespace of Absinthe traces before the Absinthe instrumentation had run.
+  This is now possible, as the Absinthe instrumentation will only set the namespace if it has not been set already.
+
+  (patch [62915710](https://github.com/appsignal/appsignal-elixir/commit/629157103edff72af0cb87382cd8f1cc6a848cda))
+
+## 2.15.8
+
+_Published on 2025-06-06._
+
+### Added
+
+- Add `nginx_port` configuration option. This configuration option can be used to customize the port on which the AppSignal integration exposes [the NGINX metrics server](https://docs.appsignal.com/metrics/nginx.html). (patch [f5c3f2c7](https://github.com/appsignal/appsignal-elixir/commit/f5c3f2c7f5f23990cfb18d6a1b54460c9f12165e))
+
+## 2.15.7
+
+_Published on 2025-05-12._
+
+### Changed
+
+- Update the `result` attribute reported for Oban jobs. Instead of it including the job's whole return value, it only contains the Oban job control value: `:ok`/`:error`/`:discard`/`:cancel`/`:snooze`.
+  The reason for a discard, cancel, error or snooze result will be stored in the new `result_reason` attribute.
+  Any `:ok` result reasons and unexpected result values are ignored. This is to avoid storing sensitive data in the attributes and to make it easier to filter by job control value in the interface.
+
+  (patch [9bf7b20a](https://github.com/appsignal/appsignal-elixir/commit/9bf7b20acfb5f823f82136fc7a6ff5613c64a1ae))
+
+## 2.15.6
+
+_Published on 2025-05-08._
+
+### Changed
+
+- Log a debug message when the reported error is ignored by the `ignore_errors` config option. (patch [6f944f6b](https://github.com/appsignal/appsignal-elixir/commit/6f944f6b3d350939fdfe922d7a8c9155374361f5))
+
+## 2.15.5
+
+_Published on 2025-05-05._
+
+### Added
+
+- Report Oban's configuration [prefix](https://hexdocs.pm/oban/Oban.Migration.html#module-isolation-with-prefixes) value, if present, as a tag in Oban job samples. Thanks to [@tfwright](https://github.com/tfwright) for suggesting and implementing this feature. (patch [9641fadf](https://github.com/appsignal/appsignal-elixir/commit/9641fadf82e87d61008158a09424ae3bbea258cc))
+
+### Changed
+
+- Remove redundant cron check-in pairs. When more than one pair of start and finish cron check-in events is reported for the same identifier in the same period, only one of them will be reported to AppSignal. (patch [e6cc5d29](https://github.com/appsignal/appsignal-elixir/commit/e6cc5d29f2beb706c92a321690cdec043809dcc6))
+
+## 2.15.4
+
+_Published on 2025-04-04._
+
+### Added
+
+- Allow keyword list configurations (patch [6c938dc6](https://github.com/appsignal/appsignal-elixir/commit/6c938dc6510b9da0c84a7dddefcf430a68b8b25b))
+
+## 2.15.3
+
+_Published on 2025-03-20._
+
+### Added
+
+- Add a mix task to check the extension install.
+
+  Run `mix appsignal.check_install` to see if the NIF and agent were successfully installed. If not, it will return with exit code 1. Use this in your CI or build step to check if AppSignal was installed correctly before deploying or starting your application.
+
+  (patch [bab913f7](https://github.com/appsignal/appsignal-elixir/commit/bab913f7dbfb0b93f8f49671e8d432192ece59f8))
+
+### Fixed
+
+- Fix an issue where the check-in scheduler would crash when failing to send a check-in due to a network error. (patch [fc55fb00](https://github.com/appsignal/appsignal-elixir/commit/fc55fb00eb352444d73c9443c53eca4543633f27))
+
+## 2.15.2
+
+_Published on 2025-03-17._
+
+### Fixed
+
+- Fix an issue where the check-in scheduler crashes upon use. (patch [20abf347](https://github.com/appsignal/appsignal-elixir/commit/20abf347521f4480a49467dfca37894fb614e426))
+
+## 2.15.1
+
+_Published on 2025-03-14._
+
+### Changed
+
+- Improve SQL sanitisation for functions and numbered placeholders. (patch [1a8251e0](https://github.com/appsignal/appsignal-elixir/commit/1a8251e083781b2741d6cbf7b188da008b6b5f74))
+
+## 2.15.0
+
+_Published on 2025-03-14._
+
+### Changed
+
+- [a622d322](https://github.com/appsignal/appsignal-elixir/commit/a622d322c53ef6606a5bd89aedcb60443c1208df) minor - Switch Hackney to Finch as the bundled HTTP client to operate within the integration
+
 ## 2.14.1
 
 _Published on 2025-03-11._

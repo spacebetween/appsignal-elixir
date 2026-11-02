@@ -118,8 +118,26 @@ defmodule Appsignal.ObanTest do
 
     test "adds job queue time distribution value", %{fake_appsignal: fake_appsignal} do
       assert [
-               %{key: _, value: 3000, tags: %{queue: "default"}}
+               %{key: _, value: 3456.789, tags: %{queue: "default"}}
              ] = FakeAppsignal.get_distribution_values(fake_appsignal, "oban_job_queue_time")
+    end
+  end
+
+  describe "oban_job_start/4, with a :conf metadata key (v2.4.0)" do
+    test "sets the prefix as a span tag if present" do
+      execute_job_start(%{
+        conf: sample_conf(prefix: "foo")
+      })
+
+      assert attribute?("prefix", "foo")
+    end
+
+    test "does not set the prefix as a span tag if not present" do
+      execute_job_start(%{
+        conf: sample_conf()
+      })
+
+      assert !has_attribute?("prefix")
     end
   end
 
@@ -158,13 +176,13 @@ defmodule Appsignal.ObanTest do
 
     test "adds job duration distribution value", %{fake_appsignal: fake_appsignal} do
       assert [
-               %{key: _, value: 123, tags: %{worker: "Test.Worker"}},
+               %{key: _, value: 123.456, tags: %{worker: "Test.Worker"}},
                %{
                  key: _,
-                 value: 123,
+                 value: 123.456,
                  tags: %{hostname: "Bobs-MBP.example.com", worker: "Test.Worker"}
                },
-               %{key: _, value: 123, tags: %{state: "success", worker: "Test.Worker"}}
+               %{key: _, value: 123.456, tags: %{state: "success", worker: "Test.Worker"}}
              ] = FakeAppsignal.get_distribution_values(fake_appsignal, "oban_job_duration")
     end
 
@@ -205,28 +223,48 @@ defmodule Appsignal.ObanTest do
 
     test "adds job duration distribution value", %{fake_appsignal: fake_appsignal} do
       assert [
-               %{key: _, value: 123, tags: %{worker: "Test.Worker"}},
+               %{key: _, value: 123.456, tags: %{worker: "Test.Worker"}},
                %{
                  key: _,
-                 value: 123,
+                 value: 123.456,
                  tags: %{hostname: "Bobs-MBP.example.com", worker: "Test.Worker"}
                },
-               %{key: _, value: 123, tags: %{state: "snoozed", worker: "Test.Worker"}}
+               %{key: _, value: 123.456, tags: %{state: "snoozed", worker: "Test.Worker"}}
              ] = FakeAppsignal.get_distribution_values(fake_appsignal, "oban_job_duration")
     end
   end
 
-  describe "oban_job_stop/4, with a :result metadata key (v2.5.0)" do
-    setup do
-      execute_job_start()
-
-      execute_job_stop(%{
-        result: {:ok, 42}
-      })
-    end
-
+  describe "oban_job_stop/4, with a :result metadata value (v2.5.0)" do
     test "sets the result attribute" do
-      assert attribute?("result", "{:ok, 42}")
+      [
+        {:ok, "ok", nil},
+        {:discard, "discard", nil},
+        {{:cancel, "cancel reason"}, "cancel", "cancel reason"},
+        {{:discard, "discard reason"}, "discard", "discard reason"},
+        {{:ok, "something"}, "ok", nil},
+        {{:error, "error reason"}, "error", "error reason"},
+        {{:snooze, 1_001}, "snooze", "1001"},
+
+        # Testing some non-string values and their conversions into strings
+        {{:cancel, :my_reason}, "cancel", "my_reason"},
+        {{:cancel, true}, "cancel", "true"},
+        {{:cancel, false}, "cancel", "false"},
+        {{:cancel, -12.35}, "cancel", "-12.35"},
+        {{:cancel, [abc: :def]}, "cancel", "[abc: :def]"},
+        {{:cancel, 0..255}, "cancel", "0..255"},
+        {"other value", "ok", nil}
+      ]
+      |> Enum.each(fn {return_value, expected_value, expected_reason} ->
+        execute_job_start()
+
+        execute_job_stop(%{result: return_value})
+
+        assert attribute?("result", expected_value)
+
+        if expected_reason do
+          assert attribute?("result_reason", expected_reason)
+        end
+      end)
     end
   end
 
@@ -279,13 +317,97 @@ defmodule Appsignal.ObanTest do
 
     test "adds job duration distribution value", %{fake_appsignal: fake_appsignal} do
       assert [
-               %{key: _, value: 123, tags: %{worker: "Test.Worker"}},
+               %{key: _, value: 123.456, tags: %{worker: "Test.Worker"}},
                %{
                  key: _,
-                 value: 123,
+                 value: 123.456,
                  tags: %{hostname: "Bobs-MBP.example.com", worker: "Test.Worker"}
                },
-               %{key: _, value: 123, tags: %{state: "failure", worker: "Test.Worker"}}
+               %{key: _, value: 123.456, tags: %{state: "failure", worker: "Test.Worker"}}
+             ] = FakeAppsignal.get_distribution_values(fake_appsignal, "oban_job_duration")
+    end
+
+    test "does not detach the handler" do
+      assert attached?([:oban, :job, :exception])
+    end
+  end
+
+  describe "oban_job_exception/4, when no span exists" do
+    setup do
+      fake_appsignal = start_supervised!(FakeAppsignal)
+
+      with_config(%{}, &Appsignal.Oban.attach/0)
+
+      execute_job_exception()
+
+      [fake_appsignal: fake_appsignal]
+    end
+
+    test "creates a span" do
+      assert {:ok, [{"oban"}]} = Test.Tracer.get(:create_span)
+    end
+
+    test "closes the span" do
+      assert {:ok, [{%Span{}}]} = Test.Tracer.get(:close_span)
+    end
+
+    test "sets the span's name" do
+      assert {:ok, [{%Span{}, "Test.Worker#perform"}]} = Test.Span.get(:set_name)
+    end
+
+    test "sets the span's category" do
+      assert attribute?("appsignal:category", "job.oban")
+    end
+
+    test "sets job arguments as span params" do
+      assert {:ok, [{%Span{}, "params", %{foo: "bar"}}]} = Test.Span.get(:set_sample_data)
+    end
+
+    test "sets job attributes as span tags" do
+      assert attribute?("id", 123)
+      assert attribute?("worker", "Test.Worker")
+      assert attribute?("queue", "default")
+      assert attribute?("attempt", 1)
+    end
+
+    test "sets the state attribute to failure" do
+      assert attribute?("state", "failure")
+    end
+
+    test "adds the error to the span" do
+      assert {:ok,
+              [
+                {
+                  %Span{},
+                  :error,
+                  %RuntimeError{message: "Exception!"},
+                  [{Appsignal.ObanTest, :execute_job_exception, _, _} | _]
+                }
+              ]} = Test.Span.get(:add_error)
+    end
+
+    test "increments job stop counter", %{fake_appsignal: fake_appsignal} do
+      assert [
+               %{key: _, value: 1, tags: %{state: "failure"}},
+               %{key: _, value: 1, tags: %{state: "failure", queue: "default"}},
+               %{key: _, value: 1, tags: %{state: "failure", worker: "Test.Worker"}},
+               %{
+                 key: _,
+                 value: 1,
+                 tags: %{state: "failure", worker: "Test.Worker", queue: "default"}
+               }
+             ] = FakeAppsignal.get_counters(fake_appsignal, "oban_job_count")
+    end
+
+    test "adds job duration distribution value", %{fake_appsignal: fake_appsignal} do
+      assert [
+               %{key: _, value: 123.456, tags: %{worker: "Test.Worker"}},
+               %{
+                 key: _,
+                 value: 123.456,
+                 tags: %{hostname: "Bobs-MBP.example.com", worker: "Test.Worker"}
+               },
+               %{key: _, value: 123.456, tags: %{state: "failure", worker: "Test.Worker"}}
              ] = FakeAppsignal.get_distribution_values(fake_appsignal, "oban_job_duration")
     end
 
@@ -328,13 +450,13 @@ defmodule Appsignal.ObanTest do
 
     test "adds job duration distribution value", %{fake_appsignal: fake_appsignal} do
       assert [
-               %{key: _, value: 123, tags: %{worker: "Test.Worker"}},
+               %{key: _, value: 123.456, tags: %{worker: "Test.Worker"}},
                %{
                  key: _,
-                 value: 123,
+                 value: 123.456,
                  tags: %{hostname: "Bobs-MBP.example.com", worker: "Test.Worker"}
                },
-               %{key: _, value: 123, tags: %{state: "discard", worker: "Test.Worker"}}
+               %{key: _, value: 123.456, tags: %{state: "discard", worker: "Test.Worker"}}
              ] = FakeAppsignal.get_distribution_values(fake_appsignal, "oban_job_duration")
     end
   end
@@ -615,7 +737,7 @@ defmodule Appsignal.ObanTest do
   defp execute_job_stop(additional_metadata \\ %{}) do
     :telemetry.execute(
       [:oban, :job, :stop],
-      %{duration: 123 * 1_000_000},
+      %{duration: 123_456_000},
       Map.merge(sample_metadata(), additional_metadata)
     )
   end
@@ -634,7 +756,7 @@ defmodule Appsignal.ObanTest do
 
         :telemetry.execute(
           [:oban, :job, :exception],
-          %{duration: 123 * 1_000_000},
+          %{duration: 123_456_000},
           Map.merge(metadata, additional_metadata)
         )
     end
@@ -663,8 +785,8 @@ defmodule Appsignal.ObanTest do
   defp sample_job do
     %{
       priority: 0,
-      scheduled_at: DateTime.from_unix!(1_234_000_000),
-      attempted_at: DateTime.from_unix!(1_234_000_003),
+      scheduled_at: DateTime.from_unix!(1_234_000_000_000_000, :microsecond),
+      attempted_at: DateTime.from_unix!(1_234_000_003_456_789, :microsecond),
       meta: %{
         number: 123,
         string: "foo",
@@ -681,5 +803,28 @@ defmodule Appsignal.ObanTest do
         worker: :"Test.Worker"
       }
     }
+  end
+
+  defp sample_conf(opts \\ []) do
+    Appsignal.ObanTest.ObanConfig.new(opts)
+  end
+end
+
+# A struct that emulates the `Oban.Config` struct:
+# https://github.com/oban-bg/oban/blob/8b0aada8b2bdbe7a338c34c87a5f3c079e9800ad/lib/oban/config.ex#L32-L47
+defmodule Appsignal.ObanTest.ObanConfig do
+  @moduledoc false
+
+  defstruct prefix: false
+
+  # A subset of `Oban.Config`'s typing:
+  # https://hexdocs.pm/oban/Oban.Config.html#t:t/0
+  @type t :: %__MODULE__{
+          prefix: false | String.t()
+        }
+
+  @doc false
+  def new(opts) do
+    struct!(__MODULE__, opts)
   end
 end

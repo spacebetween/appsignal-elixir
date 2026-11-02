@@ -211,6 +211,30 @@ defmodule Appsignal.ConfigTest do
     end
   end
 
+  describe "instrument_broadway?" do
+    test "when true" do
+      assert with_config(
+               %{instrument_broadway: true},
+               &Config.instrument_broadway?/0
+             )
+    end
+
+    test "when false" do
+      refute with_config(
+               %{instrument_broadway: false},
+               &Config.instrument_broadway?/0
+             )
+    end
+
+    test "when unset" do
+      assert with_config(%{}, &Config.instrument_broadway?/0)
+    end
+
+    test "without an appsignal config" do
+      assert without_config(&Config.instrument_broadway?/0)
+    end
+  end
+
   describe "instrument_ecto?" do
     test "when true" do
       assert with_config(
@@ -639,6 +663,10 @@ defmodule Appsignal.ConfigTest do
       assert %{statsd_port: "3000"} = with_config(%{statsd_port: "3000"}, &init_config/0)
     end
 
+    test "nginx_port" do
+      assert %{nginx_port: "4321"} = with_config(%{nginx_port: "4321"}, &init_config/0)
+    end
+
     test "transaction_debug_mode" do
       assert %{transaction_debug_mode: true} =
                with_config(%{transaction_debug_mode: true}, &init_config/0)
@@ -1052,6 +1080,13 @@ defmodule Appsignal.ConfigTest do
                &init_config/0
              ) == default_configuration() |> Map.put(:revision, "03bd9e")
     end
+
+    test "nginx_port" do
+      assert with_env(
+               %{"APPSIGNAL_NGINX_PORT" => "4321"},
+               &init_config/0
+             ) == default_configuration() |> Map.put(:nginx_port, "4321")
+    end
   end
 
   describe "config based on system" do
@@ -1216,6 +1251,7 @@ defmodule Appsignal.ConfigTest do
       assert Nif.env_get("_APPSIGNAL_WORKING_DIRECTORY_PATH") == ~c""
       assert Nif.env_get("_APPSIGNAL_RUNNING_IN_CONTAINER") == ~c""
       assert Nif.env_get("_APPSIGNAL_STATSD_PORT") == ~c""
+      assert Nif.env_get("_APPSIGNAL_NGINX_PORT") == ~c""
       assert Nif.env_get("_APP_REVISION") == ~c""
     end
 
@@ -1271,7 +1307,8 @@ defmodule Appsignal.ConfigTest do
           transaction_debug_mode: true,
           filter_parameters: ["password", "confirm_password"],
           filter_session_data: ["key1", "key2"],
-          statsd_port: "3000"
+          statsd_port: "3000",
+          nginx_port: "1234"
         },
         fn ->
           without_logger(&write_to_environment/0)
@@ -1318,6 +1355,7 @@ defmodule Appsignal.ConfigTest do
           assert Nif.env_get("_APPSIGNAL_FILTER_SESSION_DATA") == ~c"key1,key2"
           assert Nif.env_get("_APPSIGNAL_SEND_ENVIRONMENT_METADATA") == ~c"true"
           assert Nif.env_get("_APPSIGNAL_STATSD_PORT") == ~c"3000"
+          assert Nif.env_get("_APPSIGNAL_NGINX_PORT") == ~c"1234"
           assert Nif.env_get("_APP_REVISION") == ~c"03bd9e"
         end
       )
@@ -1434,7 +1472,7 @@ defmodule Appsignal.ConfigTest do
       enable_minutely_probes: true,
       enable_nginx_metrics: false,
       enable_statsd: false,
-      enable_error_backend: true,
+      enable_error_backend: false,
       endpoint: "https://push.appsignal.com",
       env: :dev,
       files_world_accessible: true,
@@ -1456,6 +1494,7 @@ defmodule Appsignal.ConfigTest do
       skip_session_data: false,
       transaction_debug_mode: false,
       instrument_absinthe: true,
+      instrument_broadway: true,
       instrument_ecto: true,
       instrument_finch: true,
       instrument_oban: true,
@@ -1476,8 +1515,27 @@ defmodule Appsignal.ConfigTest do
   end
 
   defp without_logger(fun) do
-    Logger.disable(self())
+    put_process_level(self(), :none)
     fun.()
-    Logger.enable(self())
+    delete_process_level(self())
+  end
+
+  # Logger process-level APIs differ between Elixir versions.
+  # Newer versions expose put/delete process-level calls, while older
+  # versions still rely on disable/enable.
+  # Use dispatch by exported function so OTP 24 CI and newer versions
+  # both compile and run these tests.
+  if function_exported?(Logger, :put_process_level, 2) do
+    defp put_process_level(pid, level), do: Logger.put_process_level(pid, level)
+    defp delete_process_level(pid), do: Logger.delete_process_level(pid)
+  else
+    if function_exported?(Logger, :put_process_level, 1) do
+      defp put_process_level(_pid, level), do: Logger.put_process_level(level)
+      defp delete_process_level(_pid), do: Logger.delete_process_level()
+    else
+      # Elixir 1.11 does not expose put/delete process-level calls.
+      defp put_process_level(pid, _level), do: Logger.disable(pid)
+      defp delete_process_level(pid), do: Logger.enable(pid)
+    end
   end
 end

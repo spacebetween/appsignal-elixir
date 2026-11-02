@@ -4,6 +4,10 @@ if Mix.env() in [:bench, :test, :test_no_nif] do
   config :appsignal, appsignal_system: Appsignal.FakeSystem
   config :appsignal, appsignal_nif: Appsignal.FakeNif
   config :appsignal, appsignal_diagnose_report: Appsignal.Diagnose.FakeReport
+
+  config :appsignal,
+    appsignal_diagnose_installation_report: Appsignal.Diagnose.FakeInstallationReport
+
   config :appsignal, appsignal: Appsignal.FakeAppsignal
   config :appsignal, appsignal_integration_logger: Appsignal.FakeIntegrationLogger
   config :appsignal, appsignal_transmitter: Appsignal.FakeTransmitter
@@ -15,6 +19,8 @@ if Mix.env() in [:bench, :test, :test_no_nif] do
   config :appsignal, file: FakeFile
   config :appsignal, os_internal: FakeOS
   config :appsignal, ecto_repo: FakeEctoRepo
+
+  config :appsignal, appsignal_httpoison_base: FakeHTTPoisonBase
 
   config :appsignal, appsignal_monitor: Appsignal.Test.Monitor
   config :appsignal, appsignal_span: Appsignal.Test.Span

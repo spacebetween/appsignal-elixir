@@ -5,6 +5,8 @@ defmodule Appsignal.Oban do
   @span Application.compile_env(:appsignal, :appsignal_span, Appsignal.Span)
   @appsignal Application.compile_env(:appsignal, :appsignal, Appsignal)
 
+  import Appsignal.Utils, only: [native_to_milliseconds: 1]
+
   @moduledoc false
 
   def attach do
@@ -50,15 +52,21 @@ defmodule Appsignal.Oban do
   def oban_job_start(
         _event,
         _measurements,
-        %{
-          id: id,
-          args: args,
-          queue: queue,
-          worker: worker,
-          attempt: attempt
-        } = metadata,
+        metadata,
         _config
       ) do
+    do_oban_job_start(metadata)
+  end
+
+  defp do_oban_job_start(
+         %{
+           id: id,
+           args: args,
+           queue: queue,
+           worker: worker,
+           attempt: attempt
+         } = metadata
+       ) do
     span = @tracer.create_span("oban")
 
     span
@@ -69,6 +77,17 @@ defmodule Appsignal.Oban do
     |> @span.set_attribute("attempt", attempt)
     |> @span.set_attribute("worker", to_string(worker))
     |> @span.set_attribute("appsignal:category", "job.oban")
+
+    # The `:conf` metadata key was added in Oban v2.4.0.
+    conf = metadata[:conf]
+
+    if conf do
+      prefix = Map.get(conf, :prefix)
+
+      if prefix do
+        @span.set_attribute(span, "prefix", prefix)
+      end
+    end
 
     # The `:job` metadata key was added in Oban v2.3.1.
     job = metadata[:job]
@@ -85,6 +104,8 @@ defmodule Appsignal.Oban do
     for tag <- Map.get(metadata, :tags, []) do
       @span.set_attribute(span, "job_tag_#{tag}", true)
     end
+
+    span
   end
 
   def oban_job_stop(
@@ -105,8 +126,16 @@ defmodule Appsignal.Oban do
       |> @span.set_attribute("state", to_string(state))
 
     # The `:result` metadata key was added in Oban v2.5.0.
+    # This refers to the Oban.Worker 'result' type that controls whether a job
+    # is treated as a success or a failure.
     if Map.has_key?(metadata, :result) do
-      @span.set_attribute(span, "result", inspect(metadata[:result]))
+      {result, reason} = oban_result_and_reason(metadata[:result])
+
+      @span.set_attribute(span, "result", result)
+
+      if reason do
+        @span.set_attribute(span, "result_reason", reason)
+      end
     end
 
     @tracer.close_span(span)
@@ -120,8 +149,8 @@ defmodule Appsignal.Oban do
         _event,
         %{duration: duration},
         %{
-          worker: worker,
           queue: queue,
+          worker: worker,
           kind: kind,
           error: reason,
           stacktrace: stacktrace
@@ -132,13 +161,10 @@ defmodule Appsignal.Oban do
     # If not present, assume the job failed.
     state = Map.get(metadata, :state, "failure")
 
-    span =
-      @tracer.current_span()
-      |> @span.set_attribute("state", to_string(state))
-
-    @span.add_error(span, kind, reason, stacktrace)
-
-    @tracer.close_span(span)
+    (@tracer.current_span() || do_oban_job_start(metadata))
+    |> @span.set_attribute("state", to_string(state))
+    |> @span.add_error(kind, reason, stacktrace)
+    |> @tracer.close_span()
 
     increment_job_stop_counter(worker, queue, state)
 
@@ -208,14 +234,14 @@ defmodule Appsignal.Oban do
     Enum.each(tag_combinations, fn tags ->
       @appsignal.add_distribution_value(
         "oban_job_duration",
-        System.convert_time_unit(duration, :native, :millisecond),
+        native_to_milliseconds(duration),
         tags
       )
     end)
   end
 
   defp add_job_queue_time_value(job, queue) do
-    delay = DateTime.diff(job.attempted_at, job.scheduled_at, :millisecond)
+    delay = DateTime.diff(job.attempted_at, job.scheduled_at, :microsecond) / 1000
 
     @appsignal.add_distribution_value("oban_job_queue_time", delay, %{
       queue: to_string(queue)
@@ -239,6 +265,34 @@ defmodule Appsignal.Oban do
       if value do
         @span.set_attribute(span, "job_meta_#{key}", value)
       end
+    end
+  end
+
+  defp oban_result_and_reason(result_value) do
+    case result_value do
+      :ok -> {"ok", nil}
+      :discard -> {"discard", nil}
+      {:cancel, reason} -> {"cancel", oban_map_reason(reason)}
+      {:discard, reason} -> {"discard", oban_map_reason(reason)}
+      {:ok, _} -> {:ok, nil}
+      {:error, reason} -> {"error", oban_map_reason(reason)}
+      {:snooze, reason} -> {"snooze", oban_map_reason(reason)}
+      # A job can technically return anything that's not a valid Oban.Worker 'result' type.
+      # Account for this here and consider it a success, like Oban does.
+      _ -> {"ok", nil}
+    end
+  end
+
+  defp oban_map_reason(value) do
+    case value do
+      v when is_binary(v) ->
+        v
+
+      v when is_integer(v) or is_float(v) or is_boolean(v) or is_atom(v) ->
+        to_string(v)
+
+      _ ->
+        inspect(value)
     end
   end
 end
