@@ -3,23 +3,64 @@ defmodule Appsignal.Transmitter do
 
   require Logger
 
-  def request(method, url, headers \\ [], body \\ "") do
-    http_client = Application.get_env(:appsignal, :http_client, :hackney)
-    :application.ensure_all_started(http_client)
+  def request_standalone(method, url, headers \\ [], body \\ "") do
+    :application.ensure_all_started(:telemetry)
 
-    http_client.request(method, url, headers, body, options())
+    http_client = Application.get_env(:appsignal, :http_client, Finch)
+    name = :"AppsignalFinch_#{:erlang.unique_integer([:positive])}"
+    {:ok, pid} = Finch.start_link(name: name, pools: %{default: pool_options(url)})
+
+    try do
+      method
+      |> http_client.build(url, headers, body)
+      |> http_client.request(name)
+    after
+      Process.exit(pid, :normal)
+    end
   end
 
-  def transmit(url, payload_and_format \\ {nil, nil}, config \\ nil)
-  def transmit(url, nil, config), do: transmit(url, {nil, nil}, config)
+  def request(method, url, headers \\ [], body \\ "") do
+    http_client = Application.get_env(:appsignal, :http_client, Finch)
 
-  # This function calls `:hackney.request/5` -- it is the
-  # caller's responsibility to ensure that `:hackney.close/1` is
-  # called afterwards.
-  #
-  # If you're not interested in the body, only in the status code
-  # and headers, use `transmit_and_close/3` instead.
+    method
+    |> http_client.build(url, headers, body)
+    |> http_client.request(AppsignalFinch)
+  end
+
+  @doc false
+  def pool_options(url \\ nil) do
+    if https?(url) do
+      case ssl_options() do
+        [] -> []
+        ssl_opts -> [conn_opts: [transport_opts: ssl_opts]]
+      end
+    else
+      []
+    end
+  end
+
+  defp https?(nil), do: true
+  defp https?(url), do: String.starts_with?(url, "https://")
+
+  def transmit(url, payload_and_format \\ {nil, nil}, config \\ nil)
+
+  def transmit(url, nil, config) do
+    transmit(url, {nil, nil}, config)
+  end
+
   def transmit(url, {payload, format}, config) do
+    do_transmit(url, {payload, format}, config, false)
+  end
+
+  def transmit(url, nil, config, standalone) do
+    transmit(url, {nil, nil}, config, standalone)
+  end
+
+  def transmit(url, {payload, format}, config, standalone) do
+    do_transmit(url, {payload, format}, config, standalone)
+  end
+
+  def do_transmit(url, {payload, format}, config, standalone) do
     config = config || Appsignal.Config.config()
 
     params =
@@ -35,18 +76,8 @@ defmodule Appsignal.Transmitter do
 
     body = encode_body(payload, format)
 
-    request(:post, url, headers, body)
-  end
-
-  def transmit_and_close(url, payload_and_format \\ {nil, nil}, config \\ nil) do
-    case transmit(url, payload_and_format, config) do
-      {:ok, status, headers, reference} ->
-        :hackney.close(reference)
-        {:ok, status, headers}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+    request_fun = if standalone, do: &request_standalone/4, else: &request/4
+    request_fun.(:post, url, headers, body)
   end
 
   defp encode_body(nil, _), do: ""
@@ -57,27 +88,17 @@ defmodule Appsignal.Transmitter do
     |> Enum.map_join("\n", &Jason.encode!/1)
   end
 
-  defp options do
-    ssl_options() ++
-      [
-        pool: :appsignal_transmitter
-      ]
-  end
-
   defp ssl_options do
     ca_file_path = Appsignal.Config.ca_file_path()
 
-    options =
+    result =
       case File.stat(ca_file_path) do
         {:ok, %{access: access}} when access in [:read, :read_write] ->
           {:ok,
            [
-             ssl_options:
-               [
-                 verify: :verify_peer,
-                 cacertfile: ca_file_path
-               ] ++ tls_options() ++ customize_hostname_check_or_verify_fun()
-           ]}
+             verify: :verify_peer,
+             cacertfile: ca_file_path
+           ] ++ tls_options() ++ customize_hostname_check_or_verify_fun()}
 
         {:ok, %{access: access}} ->
           {:error, "File access is #{inspect(access)}"}
@@ -86,7 +107,7 @@ defmodule Appsignal.Transmitter do
           {:error, reason}
       end
 
-    case options do
+    case result do
       {:ok, options} ->
         options
 
@@ -112,11 +133,8 @@ defmodule Appsignal.Transmitter do
       ]
     end
 
-    if System.otp_release() >= "20.3" do
-      defp ciphers, do: :ssl.cipher_suites(:default, :"tlsv1.2")
-    else
-      defp ciphers, do: :ssl.cipher_suites()
-    end
+    # OTP 21+ is required for Elixir 1.11+, so we always use the new API
+    defp ciphers, do: :ssl.cipher_suites(:default, :"tlsv1.2")
   end
 
   if System.otp_release() >= "21" do

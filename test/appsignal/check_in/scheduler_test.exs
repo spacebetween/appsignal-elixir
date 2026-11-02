@@ -167,7 +167,9 @@ defmodule Appsignal.CheckInSchedulerTest do
     end
 
     test "it logs an error when it receives a non-2xx response" do
-      FakeTransmitter.set_response({:ok, 500, :fake, :fake})
+      FakeTransmitter.set_response(
+        {:ok, %{status: 500, body: :fake, headers: :fake, trailers: :fake}}
+      )
 
       cron = Cron.new("cron-checkin-name")
 
@@ -205,7 +207,7 @@ defmodule Appsignal.CheckInSchedulerTest do
                      &1,
                      "Failed to transmit cron check-in `cron-checkin-name` start event"
                    ) &&
-                     String.ends_with?(&1, ": fake error"))
+                     String.contains?(&1, "fake error"))
                )
       end)
     end

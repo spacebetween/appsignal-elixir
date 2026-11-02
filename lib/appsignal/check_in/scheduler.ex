@@ -93,22 +93,23 @@ defmodule Appsignal.CheckIn.Scheduler do
 
   @impl true
   def handle_continue({:transmit, events}, state) do
+    events = Event.deduplicate_cron(events)
     description = Event.describe(events)
 
     config = Appsignal.Config.config()
     endpoint = "#{config[:logging_endpoint]}/check_ins/json"
 
-    case @transmitter.transmit_and_close(endpoint, {Enum.reverse(events), :ndjson}, config) do
-      {:ok, status_code, _} when status_code in 200..299 ->
+    case @transmitter.transmit(endpoint, {Enum.reverse(events), :ndjson}, config) do
+      {:ok, %{status: status_code}} when status_code in 200..299 ->
         @integration_logger.trace("Transmitted #{description}")
 
-      {:ok, status_code, _} ->
+      {:ok, %{status: status_code}} ->
         @integration_logger.error(
           "Failed to transmit #{description}: status code was #{status_code}"
         )
 
       {:error, reason} ->
-        @integration_logger.error("Failed to transmit #{description}: #{reason}")
+        @integration_logger.error("Failed to transmit #{description}: #{inspect(reason)}")
     end
 
     {
@@ -119,7 +120,7 @@ defmodule Appsignal.CheckIn.Scheduler do
   end
 
   @impl true
-  def terminate(_reason, %{events: events}) when length(events) > 0 do
+  def terminate(_reason, %{events: [_ | _] = events}) do
     # If any events are stored, attempt to transmit them before the
     # process is terminated.
     handle_continue({:transmit, events}, initial_state())

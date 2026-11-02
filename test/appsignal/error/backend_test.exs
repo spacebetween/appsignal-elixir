@@ -14,9 +14,7 @@ defmodule Murphy do
 
   def call(pid, fun) do
     ExUnit.CaptureLog.capture_log(fn ->
-      catch_exit do
-        GenServer.call(pid, fun)
-      end
+      catch_exit(GenServer.call(pid, fun))
     end)
   end
 
@@ -44,6 +42,8 @@ defmodule Appsignal.Error.BackendTest do
   import AppsignalTest.Utils
 
   setup do
+    Appsignal.Error.Backend.attach()
+
     {:ok, _pid} = start_supervised(Test.Nif)
     {:ok, _pid} = start_supervised(Test.Tracer)
     {:ok, _pid} = start_supervised(Test.Span)
@@ -54,11 +54,11 @@ defmodule Appsignal.Error.BackendTest do
   end
 
   test "is added as a Logger backend" do
-    assert {:error, :already_present} = Logger.add_backend(Backend)
+    assert {:error, :already_present} = Appsignal.Utils.LoggerHandler.add_backend(Backend)
   end
 
   test "is not added as a Logger backend when disabled" do
-    Logger.remove_backend(Appsignal.Error.Backend)
+    Appsignal.Utils.LoggerHandler.remove_backend(Appsignal.Error.Backend)
     with_config(%{enable_error_backend: false}, fn -> Appsignal.start([], []) end)
 
     assert :ok = Appsignal.Error.Backend.attach()
@@ -274,10 +274,6 @@ defmodule Appsignal.Error.BackendTest do
   end
 
   defp ignore_pid do
-    if System.otp_release() < "21" do
-      :ets.insert(:"$appsignal_registry", {pid(), :ignore})
-    else
-      Tracer.ignore()
-    end
+    Tracer.ignore(pid())
   end
 end
